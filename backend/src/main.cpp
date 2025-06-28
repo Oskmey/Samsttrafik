@@ -1,4 +1,3 @@
-#define CPPHTTPLIB_OPENSSL_SUPPORT // If you need HTTPS
 #include <httplib.h>
 #include <iostream>
 
@@ -20,7 +19,7 @@ int main(void) {
     });
 
     std::cout << "C++ Backend server starting on port 8080..." << std::endl;
-    svr.listen("0.0.0.0", 8080); 
+    svr.listen("127.0.0.1", 8080); 
 
     return 0;
 }
