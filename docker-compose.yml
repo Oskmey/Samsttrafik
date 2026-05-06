@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: smasttrafik
+      POSTGRES_USER: smasttrafik
+      POSTGRES_PASSWORD: smasttrafik
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smasttrafik -d smasttrafik"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      DATABASE_URL: postgresql://smasttrafik:smasttrafik@postgres:5432/smasttrafik
+      SMASTTRAFIK_USE_DEMO_REPOSITORY: "false"
+      SMASTTRAFIK_PORT: "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["smasttrafik-worker"]
+    environment:
+      DATABASE_URL: postgresql://smasttrafik:smasttrafik@postgres:5432/smasttrafik
+      SMASTTRAFIK_USE_DEMO_REPOSITORY: "false"
+      VASTTRAFIK_CLIENT_ID: ${VASTTRAFIK_CLIENT_ID:-}
+      VASTTRAFIK_CLIENT_SECRET: ${VASTTRAFIK_CLIENT_SECRET:-}
+      SMASTTRAFIK_MONITORED_STOP_AREAS: ${SMASTTRAFIK_MONITORED_STOP_AREAS:-9021014001760000,9021014003980000,9021014000020000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8088:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:

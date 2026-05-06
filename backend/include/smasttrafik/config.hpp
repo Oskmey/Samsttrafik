@@ -1,0 +1,39 @@
+#pragma once
+
+#include <chrono>
+#include <string>
+#include <vector>
+
+namespace smasttrafik {
+
+struct Config {
+    std::string bind_host = "0.0.0.0";
+    int port = 8080;
+
+    std::string database_url;
+    std::string migrations_dir = "backend/migrations";
+
+    std::string vasttrafik_client_id;
+    std::string vasttrafik_client_secret;
+    std::string vasttrafik_token_url = "https://ext-api.vasttrafik.se/token";
+    std::string vasttrafik_pr_base_url = "https://ext-api.vasttrafik.se/pr/v4";
+    std::string vasttrafik_ts_base_url = "https://ext-api.vasttrafik.se/ts/v1";
+    std::string accept_language = "sv";
+
+    int upstream_requests_per_minute = 60;
+    int upstream_timeout_seconds = 20;
+    int upstream_retries = 3;
+    int poll_interval_seconds = 300;
+    int departure_horizon_minutes = 60;
+    int max_departures_per_line_direction = 4;
+    bool fetch_departure_details = true;
+
+    std::vector<std::string> monitored_stop_areas;
+    bool use_demo_repository = true;
+};
+
+Config load_config();
+
+std::vector<std::string> split_csv(const std::string& value);
+
+} // namespace smasttrafik

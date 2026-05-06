@@ -1,25 +1,29 @@
-#include <httplib.h>
+#include <crow.h>
+
+#include <cstdint>
 #include <iostream>
+#include <memory>
 
-int main(void) {
-    httplib::Server svr;
+#include "smasttrafik/api_routes.hpp"
+#include "smasttrafik/config.hpp"
+#include "smasttrafik/repository.hpp"
+#include "smasttrafik/stats_service.hpp"
 
-    svr.Get("/hello", [](const httplib::Request &, httplib::Response &res) {
-        res.set_content("Hello from C++ Backend!", "text/plain");
-    });
+int main() {
+    const auto config = smasttrafik::load_config();
+    auto repository = smasttrafik::make_repository(config);
+    repository->migrate();
 
+    auto stats = std::make_shared<smasttrafik::StatsService>(repository);
 
-    svr.Post("/chat", [](const httplib::Request &req, httplib::Response &res) {
-        std::string body = req.body;
-        std::cout << "Received message: " << body << std::endl;
+    crow::SimpleApp app;
+    smasttrafik::register_api_routes(app, config, stats);
 
-        std::string reply = "Backend received: " + body; 
+    std::cout << "Smasttrafik API listening on http://" << config.bind_host << ':'
+              << config.port << " using " << repository->mode() << " data\n";
 
-        res.set_content(reply, "text/plain");
-    });
-
-    std::cout << "C++ Backend server starting on port 8080..." << std::endl;
-    svr.listen("127.0.0.1", 8080); 
-
-    return 0;
+    app.bindaddr(config.bind_host)
+        .port(static_cast<std::uint16_t>(config.port))
+        .multithreaded()
+        .run();
 }

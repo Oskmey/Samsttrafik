@@ -1,0 +1,39 @@
+FROM ubuntu:24.04 AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    git \
+    libasio-dev \
+    libcurl4-openssl-dev \
+    libpqxx-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+
+RUN cmake -S . -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DSMASTTRAFIK_ENABLE_POSTGRES=ON \
+    -DSMASTTRAFIK_BUILD_TESTS=OFF
+RUN cmake --build build --target smasttrafik-api smasttrafik-worker --parallel
+
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libcurl4 \
+    libpqxx-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=build /app/build/smasttrafik-api /usr/local/bin/smasttrafik-api
+COPY --from=build /app/build/smasttrafik-worker /usr/local/bin/smasttrafik-worker
+COPY backend/migrations /app/backend/migrations
+
+ENV SMASTTRAFIK_BIND_HOST=0.0.0.0
+EXPOSE 8080
+
+CMD ["smasttrafik-api"]

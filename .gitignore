@@ -1,2 +1,10 @@
 .vscode
 build
+cmake-build-*/
+frontend/node_modules
+frontend/dist
+frontend/*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
+.env
+*.log
