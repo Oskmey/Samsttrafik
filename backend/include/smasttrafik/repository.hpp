@@ -30,6 +30,7 @@ public:
     ) = 0;
 
     virtual void record_fetch_run(const FetchRun& run) = 0;
+    virtual std::string active_backoff_until() = 0;
     virtual void upsert_stop_areas(const std::vector<StopArea>& stops) = 0;
     virtual void upsert_departures(const std::vector<CollectedDeparture>& departures) = 0;
     virtual void upsert_traffic_situations(const Json& situations) = 0;

@@ -55,4 +55,10 @@ The web UI is exposed at `http://localhost:8088`.
 
 ## Data Notes
 
-Västtrafik credentials stay server-side. The worker uses conservative polling, retry/backoff, and 429 handling. Public pages should attribute data as “Data från Västtrafik/Trafiklab”.
+Västtrafik credentials stay server-side. Never expose `VASTTRAFIK_CLIENT_ID` or `VASTTRAFIK_CLIENT_SECRET` in frontend builds, browser-readable config, or public logs.
+
+Smästtrafik is an independent analysis tool, not an official Västtrafik service. It must not use the Västtrafik logo or official assets without permission, and it must not offer ticket or period-card purchases.
+
+The worker defaults are compliance-first: departure details are disabled, polling runs every 600 seconds, upstream requests are limited to 20 per minute with a low burst, and raw upstream payload storage is off unless `SMASTTRAFIK_STORE_RAW_PAYLOADS=true`.
+
+Public pages should attribute data as “Data från Västtrafiks öppna API:er. Smästtrafik är en fristående tjänst.” Docker Compose credentials in `.env.example` are local development samples only.

@@ -190,6 +190,22 @@ h2 {
   color: var(--vt-muted);
 }
 
+.page-intro .independence-notice {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 34px;
+  margin-top: 14px;
+  padding: 7px 10px;
+  border: 1px solid var(--vt-border);
+  border-left: 4px solid var(--vt-orange);
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--vt-blue-dark);
+  font-weight: 700;
+}
+
 .coverage {
   display: grid;
   grid-template-columns: auto auto;

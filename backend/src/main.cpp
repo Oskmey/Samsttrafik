@@ -14,7 +14,7 @@ int main() {
     auto repository = smasttrafik::make_repository(config);
     repository->migrate();
 
-    auto stats = std::make_shared<smasttrafik::StatsService>(repository);
+    auto stats = std::make_shared<smasttrafik::StatsService>(repository, config.max_custom_range_days);
 
     crow::SimpleApp app;
     smasttrafik::register_api_routes(app, config, stats);

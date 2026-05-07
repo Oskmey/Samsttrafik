@@ -5,9 +5,10 @@
 
 namespace smasttrafik {
 
-TokenBucket::TokenBucket(int tokens_per_minute)
-    : capacity_(std::max(1, tokens_per_minute)),
-      tokens_(static_cast<double>(std::max(1, tokens_per_minute))),
+TokenBucket::TokenBucket(int tokens_per_minute, int burst_capacity)
+    : refill_per_minute_(std::max(1, tokens_per_minute)),
+      capacity_(std::max(1, burst_capacity)),
+      tokens_(0.0),
       last_refill_(std::chrono::steady_clock::now()) {}
 
 void TokenBucket::wait_for_token() {
@@ -16,7 +17,7 @@ void TokenBucket::wait_for_token() {
             std::lock_guard<std::mutex> lock(mutex_);
             const auto now = std::chrono::steady_clock::now();
             const double elapsed_seconds = std::chrono::duration<double>(now - last_refill_).count();
-            const double refill_per_second = static_cast<double>(capacity_) / 60.0;
+            const double refill_per_second = static_cast<double>(refill_per_minute_) / 60.0;
             tokens_ = std::min(static_cast<double>(capacity_), tokens_ + (elapsed_seconds * refill_per_second));
             last_refill_ = now;
 

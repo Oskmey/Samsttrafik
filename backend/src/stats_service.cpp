@@ -23,8 +23,27 @@ bool is_allowed_sort(const std::string& sort) {
 
 } // namespace
 
-StatsService::StatsService(std::shared_ptr<Repository> repository)
-    : repository_(std::move(repository)) {}
+StatsService::StatsService(std::shared_ptr<Repository> repository, int max_custom_range_days)
+    : repository_(std::move(repository)),
+      max_custom_range_days_(std::max(1, max_custom_range_days)) {}
+
+DateRange StatsService::clamp_range(DateRange range) const {
+    const auto parsed_from = parse_rfc3339(range.from);
+    const auto parsed_to = parse_rfc3339(range.to);
+    if (!parsed_from || !parsed_to) {
+        return range;
+    }
+    if (*parsed_to < *parsed_from) {
+        range.from = range.to;
+        return range;
+    }
+
+    const auto max_duration = std::chrono::hours(24 * max_custom_range_days_);
+    if (*parsed_to - *parsed_from > max_duration) {
+        range.from = format_rfc3339_local(*parsed_to - max_duration);
+    }
+    return range;
+}
 
 Coverage StatsService::coverage() {
     return repository_->coverage();
@@ -50,7 +69,7 @@ RankingPage StatsService::rankings(RankingQuery query) {
     }
     query.page = std::max(1, query.page);
     query.page_size = clamp_page_size(query.page_size);
-    const auto range = resolve_period(query.period, query.from, query.to);
+    const auto range = clamp_range(resolve_period(query.period, query.from, query.to));
     query.from = range.from;
     query.to = range.to;
     return repository_->rankings(query);
@@ -68,7 +87,7 @@ std::vector<CompareSeries> StatsService::compare(CompareQuery query) {
         && query.metric != "delayed_departures") {
         query.metric = "avg_delay_minutes";
     }
-    const auto range = resolve_period("custom", query.from, query.to);
+    const auto range = clamp_range(resolve_period("custom", query.from, query.to));
     query.from = range.from;
     query.to = range.to;
     return repository_->compare(query);
@@ -80,7 +99,7 @@ std::vector<Incident> StatsService::incidents(
     const std::string& from,
     const std::string& to
 ) {
-    const auto range = resolve_period("custom", from, to);
+    const auto range = clamp_range(resolve_period("custom", from, to));
     return repository_->incidents(line_id, stop_id, range.from, range.to);
 }
 

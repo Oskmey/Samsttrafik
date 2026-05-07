@@ -1,6 +1,11 @@
 #include "smasttrafik/vasttrafik_client.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <ctime>
+#include <iomanip>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -11,6 +16,14 @@
 namespace smasttrafik {
 
 namespace {
+
+time_t portable_timegm(std::tm* tm) {
+#if defined(_WIN32)
+    return _mkgmtime(tm);
+#else
+    return timegm(tm);
+#endif
+}
 
 std::string base64_encode(const std::string& input) {
     static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -47,12 +60,40 @@ std::string join_url(const std::string& base, const std::string& path) {
     return base + path;
 }
 
+std::string lowercase(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+std::string header_value(const HttpResponse& response, const std::string& key) {
+    const std::string wanted = lowercase(key);
+    for (const auto& [name, value] : response.headers) {
+        if (lowercase(name) == wanted) {
+            return value;
+        }
+    }
+    return {};
+}
+
 } // namespace
+
+UpstreamBackoffError::UpstreamBackoffError(
+    std::string message,
+    std::chrono::system_clock::time_point backoff_until
+) : std::runtime_error(std::move(message)),
+    backoff_until_(backoff_until) {}
+
+std::chrono::system_clock::time_point UpstreamBackoffError::backoff_until() const {
+    return backoff_until_;
+}
 
 VasttrafikClient::VasttrafikClient(Config config)
     : config_(std::move(config)),
-      limiter_(config_.upstream_requests_per_minute),
-      token_expires_at_(std::chrono::system_clock::time_point::min()) {}
+      limiter_(config_.upstream_requests_per_minute, config_.upstream_burst_capacity),
+      token_expires_at_(std::chrono::system_clock::time_point::min()),
+      global_backoff_until_(std::chrono::system_clock::time_point::min()) {}
 
 nlohmann::json VasttrafikClient::fetch_stop_areas() {
     return get_json(join_url(config_.vasttrafik_pr_base_url, "/stop-areas"));
@@ -64,7 +105,8 @@ nlohmann::json VasttrafikClient::fetch_departures(const std::string& stop_area_g
         << url_encode(stop_area_gid)
         << "/departures?timeSpanInMinutes=" << config_.departure_horizon_minutes
         << "&maxDeparturesPerLineAndDirection=" << config_.max_departures_per_line_direction
-        << "&limit=100&transportModes=bus";
+        << "&limit=" << config_.departure_limit
+        << "&transportModes=bus";
     return get_json(url.str());
 }
 
@@ -89,6 +131,7 @@ nlohmann::json VasttrafikClient::get_json(const std::string& url) {
     std::exception_ptr last_error;
     for (int attempt = 0; attempt <= config_.upstream_retries; ++attempt) {
         try {
+            respect_global_backoff();
             limiter_.wait_for_token();
             const std::string token = access_token();
             const HttpResponse response = http_.get(
@@ -101,7 +144,17 @@ nlohmann::json VasttrafikClient::get_json(const std::string& url) {
                 config_.upstream_timeout_seconds
             );
 
-            if (response.status_code == 429 || response.status_code >= 500) {
+            if (response.status_code == 429) {
+                const auto now = std::chrono::system_clock::now();
+                const auto parsed_retry_after = parse_retry_after_header(header_value(response, "Retry-After"), now);
+                const auto backoff_until = parsed_retry_after.value_or(now + std::chrono::seconds(60));
+                set_global_backoff(backoff_until);
+                throw UpstreamBackoffError("Vasttrafik request rate-limited; honoring Retry-After/backoff", backoff_until);
+            }
+            if (response.status_code >= 500) {
+                last_error = std::make_exception_ptr(
+                    std::runtime_error("Vasttrafik request failed with HTTP " + std::to_string(response.status_code))
+                );
                 std::this_thread::sleep_for(std::chrono::milliseconds(500 * (attempt + 1) * (attempt + 1)));
                 continue;
             }
@@ -109,6 +162,8 @@ nlohmann::json VasttrafikClient::get_json(const std::string& url) {
                 throw std::runtime_error("Vasttrafik request failed with HTTP " + std::to_string(response.status_code));
             }
             return nlohmann::json::parse(response.body);
+        } catch (const UpstreamBackoffError&) {
+            throw;
         } catch (...) {
             last_error = std::current_exception();
             std::this_thread::sleep_for(std::chrono::milliseconds(500 * (attempt + 1)));
@@ -118,6 +173,21 @@ nlohmann::json VasttrafikClient::get_json(const std::string& url) {
         std::rethrow_exception(last_error);
     }
     throw std::runtime_error("Vasttrafik request failed");
+}
+
+void VasttrafikClient::respect_global_backoff() {
+    std::lock_guard<std::mutex> lock(backoff_mutex_);
+    const auto now = std::chrono::system_clock::now();
+    if (now < global_backoff_until_) {
+        throw UpstreamBackoffError("Vasttrafik global backoff is active", global_backoff_until_);
+    }
+}
+
+void VasttrafikClient::set_global_backoff(std::chrono::system_clock::time_point backoff_until) {
+    std::lock_guard<std::mutex> lock(backoff_mutex_);
+    if (backoff_until > global_backoff_until_) {
+        global_backoff_until_ = backoff_until;
+    }
 }
 
 std::string VasttrafikClient::access_token() {
@@ -158,6 +228,32 @@ void VasttrafikClient::authenticate() {
     if (token_.empty()) {
         throw std::runtime_error("Vasttrafik token response did not contain access_token");
     }
+}
+
+std::optional<std::chrono::system_clock::time_point> parse_retry_after_header(
+    const std::string& value,
+    std::chrono::system_clock::time_point now
+) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    if (std::all_of(value.begin(), value.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+        try {
+            return now + std::chrono::seconds(std::stoll(value));
+        } catch (...) {
+            return std::nullopt;
+        }
+    }
+
+    std::tm tm{};
+    std::istringstream stream(value);
+    stream >> std::get_time(&tm, "%a, %d %b %Y %H:%M:%S GMT");
+    if (stream.fail()) {
+        return std::nullopt;
+    }
+
+    return std::chrono::system_clock::from_time_t(portable_timegm(&tm));
 }
 
 } // namespace smasttrafik

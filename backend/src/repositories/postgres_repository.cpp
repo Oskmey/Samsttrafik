@@ -410,10 +410,27 @@ public:
         pqxx::connection connection(config_.database_url);
         pqxx::work tx(connection);
         tx.exec_params(R"SQL(
-            insert into fetch_runs (endpoint, status_code, latency_ms, rows_fetched, error)
-            values ($1, $2, $3, $4, nullif($5, ''))
-        )SQL", run.endpoint, run.status_code, run.latency_ms, run.rows_fetched, run.error);
+            insert into fetch_runs (endpoint, status_code, latency_ms, rows_fetched, error, rate_limit_remaining, backoff_until)
+            values ($1, $2, $3, $4, nullif($5, ''), nullif($6::integer, -1), nullif($7, '')::timestamptz)
+        )SQL", run.endpoint, run.status_code, run.latency_ms, run.rows_fetched, run.error, run.rate_limit_remaining, run.backoff_until);
         tx.commit();
+    }
+
+    std::string active_backoff_until() override {
+        pqxx::connection connection(config_.database_url);
+        pqxx::read_transaction tx(connection);
+        const auto rows = tx.exec(R"SQL(
+            select coalesce(to_char(backoff_until, 'YYYY-MM-DD"T"HH24:MI:SSOF'), '') as backoff_until
+            from fetch_runs
+            where backoff_until is not null
+              and backoff_until > now()
+            order by backoff_until desc
+            limit 1
+        )SQL");
+        if (rows.empty()) {
+            return {};
+        }
+        return rows[0]["backoff_until"].as<std::string>("");
     }
 
     void upsert_stop_areas(const std::vector<StopArea>& stops) override {
@@ -440,6 +457,15 @@ public:
             if (departure.service_journey.gid.empty() || departure.stop_point.gid.empty() || departure.planned_departure_at.empty()) {
                 continue;
             }
+            const Json stored_raw = config_.store_raw_payloads ? departure.raw : Json::object();
+            const Json observation_fingerprint = {
+                {"plannedDepartureAt", departure.planned_departure_at},
+                {"estimatedDepartureAt", departure.estimated_departure_at},
+                {"delaySeconds", departure.delay_seconds},
+                {"isCancelled", departure.is_cancelled},
+                {"isPartCancelled", departure.is_part_cancelled},
+                {"realtimeStopPointGid", departure.realtime_stop_point.gid},
+            };
 
             tx.exec_params(R"SQL(
                 insert into lines (gid, designation, short_name, name, transport_mode, background_color, foreground_color, border_color)
@@ -548,7 +574,7 @@ public:
                 departure.is_part_cancelled,
                 departure.realtime_stop_point.gid,
                 departure.details_reference,
-                departure.raw.dump()).one_row();
+                stored_raw.dump()).one_row();
 
             tx.exec_params(R"SQL(
                 insert into delay_observations (
@@ -559,13 +585,25 @@ public:
                     raw_hash,
                     raw
                 )
-                values ($1, nullif($2, '')::timestamptz, $3, $4, md5($5), $5::jsonb)
+                select $1, nullif($2, '')::timestamptz, $3, $4, md5($5), $6::jsonb
+                where not exists (
+                    select 1
+                    from (
+                        select raw_hash
+                        from delay_observations
+                        where departure_call_id = $1
+                        order by observed_at desc
+                        limit 1
+                    ) latest
+                    where latest.raw_hash = md5($5)
+                )
             )SQL",
                 departure_row["id"].as<long long>(),
                 departure.estimated_departure_at,
                 departure.delay_seconds,
                 departure.is_cancelled,
-                departure.raw.dump());
+                observation_fingerprint.dump(),
+                stored_raw.dump());
         }
         tx.commit();
     }
@@ -583,6 +621,7 @@ public:
             const std::string description = json_string(situation, {"description"});
             const std::string start = json_string(situation, {"startTime"}, json_string(situation, {"start"}));
             const std::string end = json_string(situation, {"endTime"}, json_string(situation, {"end"}));
+            const Json stored_raw = config_.store_raw_payloads ? situation : Json::object();
 
             tx.exec_params(R"SQL(
                 insert into traffic_situations (
@@ -606,7 +645,7 @@ public:
                     end_time = excluded.end_time,
                     raw = excluded.raw,
                     updated_at = now()
-            )SQL", situation_number, severity, title, description, start, end, situation.dump());
+            )SQL", situation_number, severity, title, description, start, end, stored_raw.dump());
         }
         tx.commit();
     }

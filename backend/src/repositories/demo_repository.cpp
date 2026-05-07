@@ -192,6 +192,8 @@ public:
 
     void record_fetch_run(const FetchRun&) override {}
 
+    std::string active_backoff_until() override { return {}; }
+
     void upsert_stop_areas(const std::vector<StopArea>& stops) override {
         std::lock_guard<std::mutex> lock(mutex_);
         for (const auto& stop : stops) {

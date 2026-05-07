@@ -118,4 +118,5 @@ create index if not exists idx_departure_calls_planned on departure_calls (plann
 create index if not exists idx_departure_calls_delay on departure_calls (delay_seconds);
 create index if not exists idx_departure_calls_stop on departure_calls (stop_point_gid, planned_departure_at);
 create index if not exists idx_delay_observations_departure on delay_observations (departure_call_id, observed_at desc);
+create index if not exists idx_delay_observations_hash on delay_observations (departure_call_id, raw_hash, observed_at desc);
 create index if not exists idx_traffic_situations_time on traffic_situations (start_time, end_time);

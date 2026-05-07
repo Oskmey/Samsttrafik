@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "smasttrafik/time_utils.hpp"
+#include "smasttrafik/vasttrafik_client.hpp"
 
 namespace {
 
@@ -50,6 +51,22 @@ void test_custom_period() {
     assert(range.to == "2026-05-06T00:00:00+02:00");
 }
 
+void test_retry_after_seconds() {
+    const auto now = std::chrono::system_clock::from_time_t(1000);
+    const auto parsed = smasttrafik::parse_retry_after_header("45", now);
+    assert(parsed.has_value());
+    assert(std::chrono::duration_cast<std::chrono::seconds>(*parsed - now).count() == 45);
+}
+
+void test_retry_after_http_date() {
+    const auto now = std::chrono::system_clock::from_time_t(0);
+    const auto parsed = smasttrafik::parse_retry_after_header("Wed, 06 May 2026 10:30:00 GMT", now);
+    const auto expected = smasttrafik::parse_rfc3339("2026-05-06T10:30:00Z");
+    assert(parsed.has_value());
+    assert(expected.has_value());
+    assert(*parsed == *expected);
+}
+
 } // namespace
 
 int main() {
@@ -60,5 +77,7 @@ int main() {
     test_delay_calculation();
     test_traffic_day_boundary();
     test_custom_period();
+    test_retry_after_seconds();
+    test_retry_after_http_date();
     std::cout << "time_utils tests passed\n";
 }

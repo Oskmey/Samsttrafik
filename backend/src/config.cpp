@@ -69,15 +69,20 @@ Config load_config() {
     config.accept_language = getenv_or("SMASTTRAFIK_ACCEPT_LANGUAGE", config.accept_language);
 
     config.upstream_requests_per_minute = getenv_int("SMASTTRAFIK_UPSTREAM_REQUESTS_PER_MINUTE", config.upstream_requests_per_minute);
+    config.upstream_burst_capacity = getenv_int("SMASTTRAFIK_UPSTREAM_BURST_CAPACITY", config.upstream_burst_capacity);
     config.upstream_timeout_seconds = getenv_int("SMASTTRAFIK_UPSTREAM_TIMEOUT_SECONDS", config.upstream_timeout_seconds);
     config.upstream_retries = getenv_int("SMASTTRAFIK_UPSTREAM_RETRIES", config.upstream_retries);
     config.poll_interval_seconds = getenv_int("SMASTTRAFIK_POLL_INTERVAL_SECONDS", config.poll_interval_seconds);
     config.departure_horizon_minutes = getenv_int("SMASTTRAFIK_DEPARTURE_HORIZON_MINUTES", config.departure_horizon_minutes);
+    config.departure_limit = getenv_int("SMASTTRAFIK_DEPARTURE_LIMIT", config.departure_limit);
     config.max_departures_per_line_direction = getenv_int(
         "SMASTTRAFIK_MAX_DEPARTURES_PER_LINE_DIRECTION",
         config.max_departures_per_line_direction
     );
+    config.max_detail_calls_per_cycle = getenv_int("SMASTTRAFIK_MAX_DETAIL_CALLS_PER_CYCLE", config.max_detail_calls_per_cycle);
+    config.max_custom_range_days = getenv_int("SMASTTRAFIK_MAX_CUSTOM_RANGE_DAYS", config.max_custom_range_days);
     config.fetch_departure_details = getenv_bool("SMASTTRAFIK_FETCH_DEPARTURE_DETAILS", config.fetch_departure_details);
+    config.store_raw_payloads = getenv_bool("SMASTTRAFIK_STORE_RAW_PAYLOADS", config.store_raw_payloads);
 
     const std::string default_stop_areas = "9021014001760000,9021014003980000,9021014000020000";
     config.monitored_stop_areas = split_csv(getenv_or("SMASTTRAFIK_MONITORED_STOP_AREAS", default_stop_areas));

@@ -173,6 +173,24 @@ std::vector<StopArea> parse_stop_areas(const Json& payload) {
     return stops;
 }
 
+void apply_backoff(FetchRun& run, const UpstreamBackoffError& error) {
+    run.status_code = 429;
+    run.error = error.what();
+    run.backoff_until = format_rfc3339_local(error.backoff_until());
+}
+
+bool apply_persisted_backoff(const std::shared_ptr<Repository>& repository, FetchRun& run) {
+    const std::string backoff_until = repository->active_backoff_until();
+    const auto parsed = parse_rfc3339(backoff_until);
+    if (parsed && std::chrono::system_clock::now() < *parsed) {
+        run.status_code = 429;
+        run.error = "Vasttrafik persisted backoff is active";
+        run.backoff_until = backoff_until;
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 TrafficCollector::TrafficCollector(Config config, std::shared_ptr<Repository> repository)
@@ -184,11 +202,18 @@ void TrafficCollector::sync_stop_areas_once() {
     FetchRun run;
     run.endpoint = "/stop-areas";
     try {
-        const auto payload = client_.fetch_stop_areas();
-        const auto stops = parse_stop_areas(payload);
-        repository_->upsert_stop_areas(stops);
-        run.status_code = 200;
-        run.rows_fetched = static_cast<int>(stops.size());
+        if (apply_persisted_backoff(repository_, run)) {
+            std::cerr << "stop-area sync skipped until " << run.backoff_until << '\n';
+        } else {
+            const auto payload = client_.fetch_stop_areas();
+            const auto stops = parse_stop_areas(payload);
+            repository_->upsert_stop_areas(stops);
+            run.status_code = 200;
+            run.rows_fetched = static_cast<int>(stops.size());
+        }
+    } catch (const UpstreamBackoffError& error) {
+        apply_backoff(run, error);
+        std::cerr << "stop-area sync backed off until " << run.backoff_until << ": " << run.error << '\n';
     } catch (const std::exception& error) {
         run.status_code = 0;
         run.error = error.what();
@@ -202,32 +227,43 @@ void TrafficCollector::collect_departures_once() {
         FetchRun run;
         run.endpoint = "/stop-areas/" + stop_area_gid + "/departures";
         try {
-            const auto payload = client_.fetch_departures(stop_area_gid);
-            auto departures = parse_departures(payload);
-            run.rows_fetched = static_cast<int>(departures.size());
+            if (apply_persisted_backoff(repository_, run)) {
+                std::cerr << "departure collection skipped for " << stop_area_gid << " until " << run.backoff_until << '\n';
+            } else {
+                const auto payload = client_.fetch_departures(stop_area_gid);
+                auto departures = parse_departures(payload);
+                run.rows_fetched = static_cast<int>(departures.size());
 
-            if (config_.fetch_departure_details) {
-                std::vector<CollectedDeparture> detailed;
-                for (const auto& seed : departures) {
-                    if (seed.details_reference.empty()) {
-                        detailed.push_back(seed);
-                        continue;
+                if (config_.fetch_departure_details) {
+                    std::vector<CollectedDeparture> detailed;
+                    int detail_calls_remaining = config_.max_detail_calls_per_cycle;
+                    for (const auto& seed : departures) {
+                        if (seed.details_reference.empty() || detail_calls_remaining <= 0) {
+                            detailed.push_back(seed);
+                            continue;
+                        }
+                        try {
+                            --detail_calls_remaining;
+                            const auto details = client_.fetch_departure_details(stop_area_gid, seed.details_reference);
+                            auto parsed = parse_departure_details(details, seed);
+                            detailed.insert(detailed.end(), parsed.begin(), parsed.end());
+                        } catch (const UpstreamBackoffError&) {
+                            throw;
+                        } catch (const std::exception& error) {
+                            std::cerr << "departure details failed for " << seed.details_reference << ": " << error.what() << '\n';
+                            detailed.push_back(seed);
+                        }
                     }
-                    try {
-                        const auto details = client_.fetch_departure_details(stop_area_gid, seed.details_reference);
-                        auto parsed = parse_departure_details(details, seed);
-                        detailed.insert(detailed.end(), parsed.begin(), parsed.end());
-                    } catch (const std::exception& error) {
-                        std::cerr << "departure details failed for " << seed.details_reference << ": " << error.what() << '\n';
-                        detailed.push_back(seed);
-                    }
+                    departures = std::move(detailed);
                 }
-                departures = std::move(detailed);
-            }
 
-            repository_->upsert_departures(departures);
-            run.status_code = 200;
-            run.rows_fetched = static_cast<int>(departures.size());
+                repository_->upsert_departures(departures);
+                run.status_code = 200;
+                run.rows_fetched = static_cast<int>(departures.size());
+            }
+        } catch (const UpstreamBackoffError& error) {
+            apply_backoff(run, error);
+            std::cerr << "departure collection backed off for " << stop_area_gid << " until " << run.backoff_until << ": " << run.error << '\n';
         } catch (const std::exception& error) {
             run.status_code = 0;
             run.error = error.what();
@@ -241,10 +277,17 @@ void TrafficCollector::collect_traffic_situations_once() {
     FetchRun run;
     run.endpoint = "/traffic-situations";
     try {
-        const auto payload = client_.fetch_traffic_situations();
-        repository_->upsert_traffic_situations(payload);
-        run.status_code = 200;
-        run.rows_fetched = static_cast<int>(array_items(payload).size());
+        if (apply_persisted_backoff(repository_, run)) {
+            std::cerr << "traffic-situation collection skipped until " << run.backoff_until << '\n';
+        } else {
+            const auto payload = client_.fetch_traffic_situations();
+            repository_->upsert_traffic_situations(payload);
+            run.status_code = 200;
+            run.rows_fetched = static_cast<int>(array_items(payload).size());
+        }
+    } catch (const UpstreamBackoffError& error) {
+        apply_backoff(run, error);
+        std::cerr << "traffic-situation collection backed off until " << run.backoff_until << ": " << run.error << '\n';
     } catch (const std::exception& error) {
         run.status_code = 0;
         run.error = error.what();

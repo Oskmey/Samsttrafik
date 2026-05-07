@@ -66,6 +66,8 @@ struct FetchRun {
     int status_code = 0;
     long latency_ms = 0;
     int rows_fetched = 0;
+    int rate_limit_remaining = -1;
+    std::string backoff_until;
     std::string error;
 };
 

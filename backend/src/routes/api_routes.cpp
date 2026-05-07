@@ -100,6 +100,20 @@ Json compare_json(const CompareSeries& series) {
     };
 }
 
+Json source_metadata(const Coverage& coverage) {
+    return {
+        {"source", "Västtrafiks öppna API:er"},
+        {"service", "Smästtrafik"},
+        {"independentService", true},
+        {"affiliation", "Inte anslutet till eller godkänt av Västtrafik"},
+        {"coverage", "Endast lagrade observationer för konfigurerade hållplatser och linjer"},
+        {"generatedFromStoredObservations", true},
+        {"mode", coverage.mode},
+        {"earliestObservation", coverage.earliest_observation},
+        {"latestObservation", coverage.latest_observation},
+    };
+}
+
 std::string read_file(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
@@ -139,6 +153,7 @@ void register_api_routes(crow::SimpleApp& app, const Config& config, std::shared
             {"service", "smasttrafik-api"},
             {"mode", coverage.mode},
             {"time", current_rfc3339_local()},
+            {"meta", source_metadata(coverage)},
         });
     });
 
@@ -152,6 +167,7 @@ void register_api_routes(crow::SimpleApp& app, const Config& config, std::shared
             {"earliestObservation", coverage.earliest_observation},
             {"latestObservation", coverage.latest_observation},
             {"mode", coverage.mode},
+            {"meta", source_metadata(coverage)},
         });
     });
 
@@ -160,7 +176,7 @@ void register_api_routes(crow::SimpleApp& app, const Config& config, std::shared
         for (const auto& line : stats->lines(param(req, "query"), param(req, "transportMode", "bus"))) {
             rows.push_back(line_json(line));
         }
-        return json_response({{"results", rows}});
+        return json_response({{"results", rows}, {"meta", source_metadata(stats->coverage())}});
     });
 
     CROW_ROUTE(app, "/api/stops")([stats](const crow::request& req) {
@@ -168,7 +184,7 @@ void register_api_routes(crow::SimpleApp& app, const Config& config, std::shared
         for (const auto& stop : stats->stops(param(req, "query"), param(req, "lineId"))) {
             rows.push_back(stop_json(stop));
         }
-        return json_response({{"results", rows}});
+        return json_response({{"results", rows}, {"meta", source_metadata(stats->coverage())}});
     });
 
     CROW_ROUTE(app, "/api/delays/rankings")([stats](const crow::request& req) {
@@ -196,6 +212,7 @@ void register_api_routes(crow::SimpleApp& app, const Config& config, std::shared
             {"total", page.total},
             {"from", page.from},
             {"to", page.to},
+            {"meta", source_metadata(stats->coverage())},
         });
     });
 
@@ -212,7 +229,7 @@ void register_api_routes(crow::SimpleApp& app, const Config& config, std::shared
         for (const auto& item : stats->compare(query)) {
             series.push_back(compare_json(item));
         }
-        return json_response({{"series", series}});
+        return json_response({{"series", series}, {"meta", source_metadata(stats->coverage())}});
     });
 
     CROW_ROUTE(app, "/api/incidents")([stats](const crow::request& req) {
@@ -225,7 +242,7 @@ void register_api_routes(crow::SimpleApp& app, const Config& config, std::shared
         )) {
             rows.push_back(incident_json(incident));
         }
-        return json_response({{"results", rows}});
+        return json_response({{"results", rows}, {"meta", source_metadata(stats->coverage())}});
     });
 
     CROW_ROUTE(app, "/assets/<path>")([](const std::string& path) {

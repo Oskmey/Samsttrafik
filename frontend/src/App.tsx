@@ -281,7 +281,7 @@ function App() {
             <span>Smästtrafik</span>
           </a>
           <nav className="main-nav" aria-label="Huvudnavigering">
-            <span className="active">Trafikstatistik</span>
+            <span className="active">Observerad statistik</span>
             <span>Linjer</span>
             <span>Hållplatser</span>
             <span>Störningar</span>
@@ -302,9 +302,10 @@ function App() {
       <main className="app-shell">
         <section className="page-intro">
           <div>
-            <span className="eyebrow">Trafikinformation</span>
+            <span className="eyebrow">Observerad statistik</span>
             <h1>Smästtrafik</h1>
-            <p>Förseningar i Västtrafiks busstrafik, rankade över tid.</p>
+            <p>Observerade bussförseningar från Västtrafiks öppna API:er, rankade över tid.</p>
+            <p className="independence-notice">Oberoende analysverktyg. Inte anslutet till eller godkänt av Västtrafik.</p>
           </div>
           <div className="coverage">
             <span>{coverageQuery.data?.mode ?? 'demo'}</span>
@@ -496,7 +497,7 @@ function App() {
       <footer className="site-footer">
         <div>
           <strong>Smästtrafik</strong>
-          <span>Data från Västtrafik/Trafiklab. Smästtrafik visar observerad täckning, inte full nätverksstatistik.</span>
+          <span>Data från Västtrafiks öppna API:er. Smästtrafik är en fristående tjänst.</span>
         </div>
       </footer>
     </>
